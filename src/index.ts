@@ -1,11 +1,12 @@
-// ManageBac MCP server for Cloudflare Workers.
-// Implements MCP's Streamable HTTP transport (stateless, JSON responses) directly,
-// so the whole Worker stays small enough to paste into the Cloudflare dashboard.
+// ManageBac MCP server for Cloudflare Workers, built on the official MCP TypeScript SDK.
+// Stateless Streamable HTTP: each request gets a fresh server + transport.
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { z } from "zod";
 import { ManageBac, Env, LoginError } from "./client";
 import { parseTaskTiles, parseClasses, mainContent, parseTimetable, htmlToText, TaskTile } from "./parse";
 
-const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-const DATE = "^\\d{4}-\\d{2}-\\d{2}$";
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const READ = { readOnlyHint: true, openWorldHint: true };
 
 type Args = Record<string, any>;
@@ -13,7 +14,7 @@ interface Tool {
   name: string;
   title: string;
   description: string;
-  inputSchema: { type: "object"; properties: Record<string, any>; required?: string[] };
+  inputSchema: z.ZodRawShape;
   annotations: Record<string, boolean>;
   run: (mb: ManageBac, a: Args) => Promise<unknown>;
 }
@@ -63,7 +64,7 @@ const TOOLS: Tool[] = [
     title: "ManageBac overview",
     description:
       "One-call snapshot: overdue tasks, upcoming tasks (next deadlines first), and unread notifications. Start here for 'what do I have due?' questions.",
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: {},
     annotations: READ,
     async run(mb) {
       const [overdue, upcoming, unread] = await Promise.all([
@@ -88,12 +89,9 @@ const TOOLS: Tool[] = [
     description:
       "List assignments from Tasks & Deadlines. view=upcoming (default), overdue, or past (past includes criterion scores like 'C: 8/8', teacher comments and early/late submission). Past is paginated (about 10 per page).",
     inputSchema: {
-      type: "object",
-      properties: {
-        view: { type: "string", enum: ["upcoming", "overdue", "past"], default: "upcoming" },
-        page: { type: "integer", minimum: 1, default: 1, description: "Page number (mostly useful for view=past)" },
-        include_comments: { type: "boolean", default: true, description: "Include teacher comments shown on the tile" },
-      },
+      view: z.enum(["upcoming", "overdue", "past"]).default("upcoming"),
+      page: z.number().int().min(1).default(1).describe("Page number (mostly useful for view=past)"),
+      include_comments: z.boolean().default(true).describe("Include teacher comments shown on the tile"),
     },
     annotations: READ,
     async run(mb, a) {
@@ -108,11 +106,7 @@ const TOOLS: Tool[] = [
     title: "Get task details",
     description:
       "Full details for one task: instructions/task sheet text, due date, assessment criteria, grades and feedback if released, your uploaded files (Dropbox), and discussion. Needs class_id and task_id (from list_tasks / get_overview).",
-    inputSchema: {
-      type: "object",
-      properties: { class_id: { type: "integer" }, task_id: { type: "integer" } },
-      required: ["class_id", "task_id"],
-    },
+    inputSchema: { class_id: z.number().int(), task_id: z.number().int() },
     annotations: READ,
     async run(mb, a) {
       const path = `/student/classes/${a.class_id}/core_tasks/${a.task_id}`;
@@ -126,12 +120,9 @@ const TOOLS: Tool[] = [
     description:
       "Calendar items (tasks, projects, events) between two dates with exact due times and descriptions. Dates as YYYY-MM-DD; defaults to today through 30 days out.",
     inputSchema: {
-      type: "object",
-      properties: {
-        start: { type: "string", pattern: DATE },
-        end: { type: "string", pattern: DATE },
-        description_chars: { type: "integer", minimum: 0, maximum: 5000, default: 400, description: "How much of each description to include (0 = none)" },
-      },
+      start: z.string().regex(DATE).optional().describe("YYYY-MM-DD"),
+      end: z.string().regex(DATE).optional().describe("YYYY-MM-DD"),
+      description_chars: z.number().int().min(0).max(5000).default(400).describe("How much of each description to include (0 = none)"),
     },
     annotations: READ,
     async run(mb, a) {
@@ -165,13 +156,10 @@ const TOOLS: Tool[] = [
     description:
       "ManageBac notifications: new/updated tasks, grades & comments posted, announcements, etc. kind=unread (default), read, starred, or all. Set full_body=true to get the full message text (e.g. complete teacher comments).",
     inputSchema: {
-      type: "object",
-      properties: {
-        kind: { type: "string", enum: ["unread", "read", "starred", "all"], default: "unread" },
-        page: { type: "integer", minimum: 1, default: 1 },
-        per_page: { type: "integer", minimum: 1, maximum: 100, default: 20 },
-        full_body: { type: "boolean", default: false },
-      },
+      kind: z.enum(["unread", "read", "starred", "all"]).default("unread"),
+      page: z.number().int().min(1).default(1),
+      per_page: z.number().int().min(1).max(100).default(20),
+      full_body: z.boolean().default(false),
     },
     annotations: READ,
     async run(mb, a) {
@@ -194,7 +182,7 @@ const TOOLS: Tool[] = [
     name: "mark_notification_read",
     title: "Mark notification read",
     description: "Mark one ManageBac notification as read (use the id from list_notifications).",
-    inputSchema: { type: "object", properties: { notification_id: { type: "integer" } }, required: ["notification_id"] },
+    inputSchema: { notification_id: z.number().int() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     async run(mb, a) {
       await mb.mnn(`notifications/${a.notification_id}/read`, "PUT");
@@ -205,7 +193,7 @@ const TOOLS: Tool[] = [
     name: "list_classes",
     title: "List my classes",
     description: "Your classes with their class_id (needed for get_class).",
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: {},
     annotations: READ,
     run: async (mb) => parseClasses(await mb.html("/student/classes/my"), mb.base),
   },
@@ -215,12 +203,8 @@ const TOOLS: Tool[] = [
     description:
       "Read a section of one class: overview, class_stream (teacher posts), units, tasks (all tasks in the class), discussions, files, or members.",
     inputSchema: {
-      type: "object",
-      properties: {
-        class_id: { type: "integer" },
-        section: { type: "string", enum: ["overview", "class_stream", "units", "tasks", "discussions", "files", "members"], default: "overview" },
-      },
-      required: ["class_id"],
+      class_id: z.number().int(),
+      section: z.enum(["overview", "class_stream", "units", "tasks", "discussions", "files", "members"]).default("overview"),
     },
     annotations: READ,
     async run(mb, a) {
@@ -235,7 +219,7 @@ const TOOLS: Tool[] = [
     name: "get_timetable",
     title: "Weekly timetable",
     description: "Your timetable for the week containing start_date (YYYY-MM-DD, default today): periods, times, rooms, teachers and attendance marks.",
-    inputSchema: { type: "object", properties: { start_date: { type: "string", pattern: DATE } } },
+    inputSchema: { start_date: z.string().regex(DATE).optional().describe("YYYY-MM-DD") },
     annotations: READ,
     run: async (mb, a) => parseTimetable(await mb.html(`/student/timetables/weekly?start_date=${a.start_date ?? todayLocal(await mb.timezone())}`)),
   },
@@ -244,99 +228,37 @@ const TOOLS: Tool[] = [
     title: "Read any student page",
     description:
       "Fallback reader for any ManageBac student page, e.g. /student/profile (reports, academic overview), /student/ib/activity/sa (Service as Action), /student/portfolio, /student/ib/pbl/... (Personal Project). Path must start with /student/.",
-    inputSchema: { type: "object", properties: { path: { type: "string", pattern: "^/student/" } }, required: ["path"] },
+    inputSchema: { path: z.string().regex(/^\/student\//) },
     annotations: READ,
     run: async (mb, a) => ({ ...mainContent(await mb.html(a.path), mb.base), url: mb.base + a.path }),
   },
 ];
 
-// ---------- argument validation (applies defaults, checks types/enums/patterns) ----------
-function prepareArgs(tool: Tool, input: unknown): Args {
-  const given: Args = input && typeof input === "object" ? (input as Args) : {};
-  const out: Args = {};
-  for (const [key, s] of Object.entries(tool.inputSchema.properties)) {
-    let v = given[key];
-    if (v === undefined || v === null) {
-      if ("default" in s) out[key] = s.default;
-      else if (tool.inputSchema.required?.includes(key)) throw new ArgError(`Missing required argument "${key}"`);
-      continue;
+function buildServer(mb: ManageBac): McpServer {
+  const server = new McpServer(
+    { name: "managebac", title: "ManageBac", version: "1.1.0" },
+    {
+      instructions:
+        "Tools for the student's ManageBac account at their school. Times are in the school's timezone (get_overview reports it). Use get_overview for what's due; list_tasks view=past for grades and teacher comments; list_notifications for recent updates.",
     }
-    if (s.type === "integer") {
-      if (typeof v === "string" && /^-?\d+$/.test(v)) v = Number(v);
-      if (!Number.isInteger(v)) throw new ArgError(`"${key}" must be an integer`);
-      if (s.minimum !== undefined && v < s.minimum) throw new ArgError(`"${key}" must be ≥ ${s.minimum}`);
-      if (s.maximum !== undefined && v > s.maximum) throw new ArgError(`"${key}" must be ≤ ${s.maximum}`);
-    } else if (s.type === "boolean") {
-      if (v === "true" || v === "false") v = v === "true";
-      if (typeof v !== "boolean") throw new ArgError(`"${key}" must be true or false`);
-    } else if (s.type === "string") {
-      if (typeof v !== "string") throw new ArgError(`"${key}" must be a string`);
-      if (s.enum && !s.enum.includes(v)) throw new ArgError(`"${key}" must be one of: ${s.enum.join(", ")}`);
-      if (s.pattern && !new RegExp(s.pattern).test(v)) throw new ArgError(`"${key}" has the wrong format`);
-    }
-    out[key] = v;
-  }
-  return out;
-}
-class ArgError extends Error {}
-
-// ---------- JSON-RPC / MCP ----------
-type Rpc = { jsonrpc: "2.0"; id?: string | number | null; method?: string; params?: any };
-const rpcResult = (id: Rpc["id"], result: unknown) => ({ jsonrpc: "2.0", id, result });
-const rpcError = (id: Rpc["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
-
-async function handleRpc(msg: Rpc, mb: ManageBac): Promise<object | null> {
-  if (!msg || msg.jsonrpc !== "2.0" || typeof msg.method !== "string") {
-    return msg && "id" in msg ? rpcError(msg.id, -32600, "Invalid request") : null;
-  }
-  const isNotification = !("id" in msg);
-  if (isNotification) return null;
-  const { id, method, params } = msg;
-  switch (method) {
-    case "initialize": {
-      const asked = params?.protocolVersion;
-      return rpcResult(id, {
-        protocolVersion: SUPPORTED_VERSIONS.includes(asked) ? asked : SUPPORTED_VERSIONS[0],
-        capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "managebac", title: "ManageBac", version: "1.1.0" },
-        instructions:
-          "Tools for the student's ManageBac account at their school. Times are in the school's timezone (get_overview reports it). Use get_overview for what's due; list_tasks view=past for grades and teacher comments; list_notifications for recent updates.",
-      });
-    }
-    case "ping":
-      return rpcResult(id, {});
-    case "tools/list":
-      return rpcResult(id, {
-        tools: TOOLS.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })),
-      });
-    case "tools/call": {
-      const tool = TOOLS.find((t) => t.name === params?.name);
-      if (!tool) return rpcError(id, -32602, `Unknown tool: ${params?.name}`);
-      let args: Args;
-      try {
-        args = prepareArgs(tool, params?.arguments);
-      } catch (e) {
-        return rpcError(id, -32602, (e as Error).message);
+  );
+  for (const tool of TOOLS) {
+    server.registerTool(
+      tool.name,
+      { title: tool.title, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations },
+      async (args: Args) => {
+        try {
+          const data = await tool.run(mb, args);
+          return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 1) }] };
+        } catch (e) {
+          const text = e instanceof LoginError ? `Login problem: ${e.message}` : `Error: ${(e as Error)?.message ?? e}`;
+          return { isError: true, content: [{ type: "text" as const, text }] };
+        }
       }
-      try {
-        const data = await tool.run(mb, args);
-        return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(data, null, 1) }] });
-      } catch (e) {
-        const text = e instanceof LoginError ? `Login problem: ${e.message}` : `Error: ${(e as Error)?.message ?? e}`;
-        return rpcResult(id, { isError: true, content: [{ type: "text", text }] });
-      }
-    }
-    case "resources/list":
-      return rpcResult(id, { resources: [] });
-    case "prompts/list":
-      return rpcResult(id, { prompts: [] });
-    default:
-      return rpcError(id, -32601, `Method not found: ${method}`);
+    );
   }
+  return server;
 }
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -345,27 +267,21 @@ export default {
       return new Response("Set a MCP_SECRET secret (at least 16 characters) first.", { status: 500 });
     }
     if (url.pathname !== `/mcp/${env.MCP_SECRET}`) return new Response("Not found", { status: 404 });
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
-    }
 
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return json(rpcError(null, -32700, "Parse error"), 400);
-    }
     let mb: ManageBac;
     try {
       mb = new ManageBac(env);
     } catch (e) {
-      return json(rpcError(null, -32603, (e as Error).message), 500);
+      return new Response((e as Error).message, { status: 500 });
     }
-    const batch = Array.isArray(body);
-    const msgs = (batch ? body : [body]) as Rpc[];
-    const replies = (await Promise.all(msgs.map((m) => handleRpc(m, mb)))).filter((r): r is object => r !== null);
+    const server = buildServer(mb);
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined, // stateless
+      enableJsonResponse: true,
+    });
+    await server.connect(transport);
+    const res = await transport.handleRequest(request);
     ctx.waitUntil(mb.flush());
-    if (!replies.length) return new Response(null, { status: 202 });
-    return json(batch ? replies : replies[0]);
+    return res;
   },
 };
