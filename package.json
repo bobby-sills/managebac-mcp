@@ -33,7 +33,7 @@
         "description": "Your ManageBac password. Stored as an encrypted Worker secret; only your Worker can read it."
       },
       "MCP_SECRET": {
-        "description": "A long random string (at least 16 characters, letters and numbers). It becomes part of your connector URL: `https://<worker>.workers.dev/mcp/<MCP_SECRET>`. Anyone with that URL can read your ManageBac, so keep it private."
+        "description": "A long random string you make up (at least 16 letters and numbers). It becomes the end of your connector URL, like `...workers.dev/mcp/YOUR_SECRET`. Anyone with that URL can read your ManageBac, so keep it private."
       },
       "SESSION": {
         "description": "Storage for the login session. Leave the default."
