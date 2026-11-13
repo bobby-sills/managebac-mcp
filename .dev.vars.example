@@ -1,0 +1,3 @@
+MB_LOGIN=you@yourschool.org
+MB_PASSWORD=your-managebac-password
+MCP_SECRET=long-random-string-that-goes-in-your-connector-url

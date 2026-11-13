@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "managebac-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "vars": {
+    // Your school's ManageBac address (the part after https://)
+    "MB_HOST": "yourschool.managebac.com"
+  },
+  // Stores the ManageBac login session. Created automatically on deploy.
+  "kv_namespaces": [{ "binding": "SESSION" }],
+  "observability": { "enabled": true }
+}
