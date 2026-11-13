@@ -82,7 +82,7 @@ export class ManageBac {
   }
 
   private async doLogin(): Promise<void> {
-    if (!this.env.MB_LOGIN || !this.env.MB_PASSWORD || /^CHANGE_ME$/.test(this.env.MB_LOGIN) || /^CHANGE_ME$/.test(this.env.MB_PASSWORD))
+    if (!this.env.MB_LOGIN || !this.env.MB_PASSWORD || /^(CHANGE_ME|you@yourschool\.org)$/.test(this.env.MB_LOGIN) || /^(CHANGE_ME|your-managebac-password)$/.test(this.env.MB_PASSWORD))
       throw new LoginError("Set the MB_LOGIN and MB_PASSWORD secrets on the Worker (Settings → Variables and Secrets).");
     const jar: Record<string, string> = {};
     const hdr = () => ({
