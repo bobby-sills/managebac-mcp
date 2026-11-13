@@ -263,8 +263,8 @@ function buildServer(mb: ManageBac): McpServer {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (!env.MCP_SECRET || env.MCP_SECRET.length < 16) {
-      return new Response("Set a MCP_SECRET secret (at least 16 characters) first.", { status: 500 });
+    if (!env.MCP_SECRET || env.MCP_SECRET.length < 16 || /CHANGE_ME|long-random-string/i.test(env.MCP_SECRET)) {
+      return new Response("Set the MCP_SECRET secret to your own random string (at least 16 characters) first.", { status: 500 });
     }
     if (url.pathname !== `/mcp/${env.MCP_SECRET}`) return new Response("Not found", { status: 404 });
 
